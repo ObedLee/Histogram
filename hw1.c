@@ -63,7 +63,7 @@ int main(int argc, char *argv[])
         fclose(hisfp);
 
         // data000.bin 파일 열기
-        sprintf(filename, "data%d.bin", i);
+        sprintf(filename, "./data/data%d.bin", i);
         fp = fopen(filename, "rb");
         if (fp == NULL)
         {
