@@ -144,8 +144,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    while (wait(&state) > 0)
-        ;
+    while (wait(&state) > 0);
 
     gettimeofday(&pETime, NULL); // 부모 종료시간 저장
 
