@@ -1,29 +1,27 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <fcntl.h>
 #include <ctype.h>
 #include <sys/time.h>
+#include <unistd.h>
 
 #define MAX_USEC 1000000
 
 typedef unsigned char BYTE;
 typedef struct timeval timeval;
 
-timeval get_subtime(timeval *time1, timeval *time2);
-timeval get_sumtime(timeval *time1, timeval *time2);
-timeval get_avgtime(timeval *time, const int num);
-timeval get_multitime(timeval *time1, timeval *time2);
-timeval get_stddevtime(timeval time[], timeval *avg, const int count);
 int get_filesize(const char *filename);
-double get_sqrt(long int num);
+timeval get_subtime(timeval *time1, timeval *time2);
+
+const char hisFileName[] = "histogram.bin";
 
 int main(int argc, char *argv[])
 {
-
     // arg 값이 올바른지 확인
-    if (argc != 3)
+    if (argc != 3 && argc != 4)
     {
-        fprintf(stderr, "Usage: %s <time1 number> <time2 number>\n", argv[0]);
-        fprintf(stderr, "Correct example: %s 1 128\n", argv[0]);
+        fprintf(stderr, "Usage: %s <start number> <end number> <child number>\n", argv[0]);
+        fprintf(stderr, "Correct example: %s 1 128 10\n", argv[0]);
         exit(1);
     }
     else if (!(isdigit(argv[1][0]) && isdigit(argv[2][0])))
@@ -32,84 +30,145 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    int sNum, eNum, count; // 파일의 시작번호, 끝번호, 파일개수
+    int sNum, eNum;              // 파일의 시작번호, 끝번호
+    int fCount, fShare, fRemain; // 파일개수, 파일개수 몫, 파일개수 나머지
+    int childNum = 1;            // 자식 프로세스 개수
 
+    if (argc == 4 && isdigit(argv[3][0]))
+        childNum = atoi(argv[3]);
     sNum = atoi(argv[1]);
     eNum = atoi(argv[2]);
-    count = eNum - sNum + 1;
+    fCount = eNum - sNum + 1;
+    fShare = fCount / childNum;
+    fRemain = fCount % childNum;
+
+    int state;
+    pid_t pid = 0; // 프로세스 id
+    int tidx = 0;  // 자식 프로세스 인덱스
+    int fidx[2];   // 자식 프로세스 파일 인덱스(시작, 종료)
+
+    timeval pSTime, pETime, pRTime; // 부모 프로세스의 시작시간, 종료시간, 수행시간
+    timeval cSTime, cETime, cRTime; // 자식 프로세스의 시작시간, 종료시간, 수행시간
 
     char filename[20];
-    int filesize; // 파일크기
+    int filesize;
     int hisSum[256];
+    int hisfd, fd;
     BYTE *hisPtr;
-    FILE *hisfp, *fp;
-    timeval sTime, eTime;                      // 프로세스의 시작시간, 종료시간
-    timeval totalTime = (timeval){0}, avgTime; // 총 수행시간, 평균 수행시간
-    timeval runTime[count];                    // 파일별 수행시간 배열
-    timeval stdDevTime;                        // 수행시간 표준편차
 
-    for (int i = sNum; i <= eNum; i++)
+    gettimeofday(&pSTime, NULL); // 부모 시작시간 저장
+
+    for (int i = 0; i < childNum; i++)
     {
-        gettimeofday(&sTime, NULL); // 시작시간 저장
+        // 자식 프로세스 생성 및 인덱스 설정
+        tidx = i;
+        pid = fork();
 
-        // histogram.bin 내용을 hisSum에 저장
-        hisfp = fopen("histogram.bin", "rb");
-        if (hisfp == NULL)
-        {
-            fprintf(stderr, "파일 열기 실패\n");
-            exit(1);
+        if (pid < 0)
+        { // fork 실패
+            printf("error: fork Fail! \n");
+            return -1;
         }
-        fread(hisSum, 1, sizeof(hisSum), hisfp);
-        fclose(hisfp);
+        else if (pid == 0)
+        { // 자식 코드
 
-        // data000.bin 파일 열기
-        sprintf(filename, "data%d.bin", i);
-        fp = fopen(filename, "rb");
-        if (fp == NULL)
-        {
-            fprintf(stderr, "파일 열기 실패\n");
-            exit(1);
+            fidx[0] = sNum + tidx * fShare;
+            fidx[1] = sNum + (tidx + 1) * fShare - 1;
+            for (int j = 0; j < tidx && j < fRemain; j++)
+            {
+                ++fidx[0];
+                ++fidx[1];
+            }
+
+            if (fRemain > tidx)
+            {
+                ++fidx[1];
+            }
+            
+            gettimeofday(&cSTime, NULL); // 자식 시작시간 저장
+            
+            for (int j = fidx[0]; j <= fidx[1]; j++)
+            {
+                // histogram.bin 내용을 hisSum에 저장
+                hisfd = open(hisFileName, O_RDONLY);
+                if (hisfd == -1)
+                {
+                    perror("파일 열기 실패\n");
+                    exit(1);
+                }
+                read(hisfd, hisSum, sizeof(hisSum));
+                close(hisfd);
+
+                // data000.bin 파일 열기
+                sprintf(filename, "data%d.bin", j);
+                fd = open(filename, O_RDONLY);
+                ;
+                if (fd == -1)
+                {
+                    perror("파일 열기 실패\n");
+                    exit(1);
+                }
+
+                // 파일 크기만큼 동적할당
+                filesize = get_filesize(filename);
+                hisPtr = malloc(filesize);
+                read(fd, hisPtr, filesize);
+                close(fd);
+
+                // hisSum 배열 elementwise 덧셈
+                for (int k = 0; k < filesize; k++)
+                {
+                    hisSum[hisPtr[k]] += 1;
+                }
+
+                // hisSum 내용을 histogram.bin에 저장
+                hisfd = open(hisFileName, O_WRONLY);
+                lockf(hisfd, F_LOCK, sizeof(hisSum));
+                if (hisfd == -1)
+                {
+                    perror("파일 열기 실패\n");
+                    exit(1);
+                }
+                write(hisfd, hisSum, sizeof(hisSum));
+                lockf(hisfd, F_ULOCK, sizeof(hisSum));
+                close(hisfd);
+            }
+
+            gettimeofday(&cETime, NULL); // 자식 종료시간 저장
+
+            cRTime = get_subtime(&cSTime, &cETime);
+
+            printf("%d번째 자식 프로세스 수행시간 : %lds %dus\n", tidx, cRTime.tv_sec, cRTime.tv_usec);
+
+            exit(0);
         }
-
-        // 파일 크기만큼 동적할당하여 데이터 저장
-        filesize = get_filesize(filename);
-        hisPtr = malloc(filesize);
-        fread(hisPtr, 1, filesize, fp);
-        fclose(fp);
-
-        // hisSum 배열 elementwise 덧셈
-        for (int j = 0; j < filesize; j++)
-        {
-            hisSum[hisPtr[j]] += 1;
-        }
-
-        // hisSum 내용을 histogram.bin에 저장
-        hisfp = fopen("histogram.bin", "wb");
-        if (hisfp == NULL)
-        {
-            fprintf(stderr, "파일 열기 실패\n");
-            exit(1);
-        }
-        fwrite(hisSum, 1, sizeof(hisSum), hisfp);
-        fclose(hisfp);
-
-        gettimeofday(&eTime, NULL); // 종료시간 저장
-
-        // 실행시간(하나의 파일을 읽어서 histogram.bin에 저장하기까지) 출력
-        runTime[i - sNum] = get_subtime(&sTime, &eTime);
-        printf("data%d.bin 파일 수행시간 : %lds %dus\n", i, runTime[i - sNum].tv_sec, runTime[i - sNum].tv_usec);
-
-        totalTime = get_sumtime(&totalTime, &runTime[i - sNum]); // 총 수행시간에 더하기
     }
 
-    avgTime = get_avgtime(&totalTime, count);              // 평균
-    stdDevTime = get_stddevtime(runTime, &avgTime, count); // 표준편차
+    while (wait(&state) > 0)
+        ;
 
-    printf("%d개 파일 수행시간 합 : %lds %dus\n", count, totalTime.tv_sec, totalTime.tv_usec);
-    printf("%d개 파일 수행시간 평균 : %lds %dus\n", count, avgTime.tv_sec, avgTime.tv_usec);
-    printf("%d개 파일 수행시간 표준편차 : %lds %dus\n", count, stdDevTime.tv_sec, stdDevTime.tv_usec);
+    gettimeofday(&pETime, NULL); // 부모 종료시간 저장
+
+    pRTime = get_subtime(&pSTime, &pETime);
+
+    printf("부모 프로세스 수행시간 : %ldsec %dusec\n", pRTime.tv_sec, pRTime.tv_usec);
 
     return 0;
+}
+
+// 파일 사이즈를 반환
+int get_filesize(const char *filename)
+{
+    int filesize = 0;
+
+    FILE *fp = fopen(filename, "r");
+
+    fseek(fp, 0, SEEK_END);
+    filesize = ftell(fp);
+
+    fclose(fp);
+
+    return filesize;
 }
 
 // 시간의 차를 timeval 구조체로 반환
@@ -133,129 +192,4 @@ timeval get_subtime(timeval *time1, timeval *time2)
     }
 
     return subTime;
-}
-
-// 시간의 합을 timeval 구조체로 반환
-timeval get_sumtime(timeval *time1, timeval *time2)
-{
-    timeval sumTime;
-
-    sumTime.tv_sec = time1->tv_sec + time2->tv_sec;
-    sumTime.tv_usec = time1->tv_usec + time2->tv_usec;
-
-    while (sumTime.tv_usec >= MAX_USEC)
-    {
-        sumTime.tv_sec++;
-        sumTime.tv_usec -= MAX_USEC;
-    }
-
-    return sumTime;
-}
-
-// 시간의 평균을 timeval 구조체로 반환
-timeval get_avgtime(timeval *time, const int count)
-{
-    timeval avgTime = (timeval){0};
-
-    // usec로 변환 후 평균 계산
-    avgTime.tv_usec = (time->tv_sec * MAX_USEC + time->tv_usec) / count;
-
-    while (avgTime.tv_usec >= MAX_USEC)
-    {
-        avgTime.tv_sec++;
-        avgTime.tv_usec -= MAX_USEC;
-    }
-
-    return avgTime;
-}
-
-// 시간의 곱을 timeval 구조체로 반환
-timeval get_multitime(timeval *time1, timeval *time2)
-{
-    timeval multiTime = (timeval){0};
-
-    // usec으로 변환 후 곱셈하여 sec로 변환할 수 있도록 소숫점 자리를 이동하는 조건문
-    if (time1->tv_sec > 0 && time2->tv_sec > 0)
-    {
-        multiTime.tv_usec = (time1->tv_sec * MAX_USEC + time1->tv_usec) * (time2->tv_sec * MAX_USEC + time2->tv_usec) / MAX_USEC;
-    }
-    else if (time1->tv_sec > 0 || time2->tv_sec > 0)
-    {
-        multiTime.tv_usec = (time1->tv_sec * MAX_USEC + time1->tv_usec) * (time2->tv_sec * MAX_USEC + time2->tv_usec) / get_sqrt(MAX_USEC);
-    }
-    else
-    {
-        multiTime.tv_usec = time1->tv_usec * time2->tv_usec;
-    }
-
-    while (multiTime.tv_usec >= MAX_USEC)
-    {
-        multiTime.tv_sec++;
-        multiTime.tv_usec -= MAX_USEC;
-    }
-
-    return multiTime;
-}
-
-// 시간의 표준편차를 timeval 구조체로 반환
-timeval get_stddevtime(timeval time[], timeval *avg, const int count)
-{
-    timeval devTime = (timeval){0};          // 시간편차(파일별 수행시간 - 평균 수행시간)
-    timeval sqrDevTime = (timeval){0};       // 시간편차의 제곱
-    timeval sumSqrDevTime = (timeval){0};    // 시간편차의 제곱의 합
-    timeval avgSumSqrDevTime = (timeval){0}; // 시간편차의 제곱의 합의 평균
-    timeval stdDevTime = (timeval){0};       // 표준편차(시간편차 제곱의 합의 평균의 제곱근)
-
-    for (int i = 0; i < count; i++)
-    {
-        devTime = get_subtime(&time[i], avg);                     // 편차 구하기
-        sqrDevTime = get_multitime(&devTime, &devTime);           // 편차의 제곱 구하기
-        sumSqrDevTime = get_sumtime(&sumSqrDevTime, &sqrDevTime); // 편차 제곱의 합 구하기
-    }
-
-    avgSumSqrDevTime = get_avgtime(&sumSqrDevTime, count); // 분산 구하기
-
-    stdDevTime.tv_usec = (long int)get_sqrt(avgSumSqrDevTime.tv_sec * MAX_USEC + avgSumSqrDevTime.tv_usec); // 표준편차 구하기
-
-    while (stdDevTime.tv_usec >= MAX_USEC)
-    {
-        stdDevTime.tv_sec++;
-        stdDevTime.tv_usec -= MAX_USEC;
-    }
-
-    return stdDevTime;
-}
-
-// 파일 사이즈를 반환
-int get_filesize(const char *filename)
-{
-    int filesize = 0;
-
-    FILE *fp = fopen(filename, "r");
-
-    fseek(fp, 0, SEEK_END);
-    filesize = ftell(fp);
-
-    fclose(fp);
-
-    return filesize;
-}
-
-// 뉴튼-랩슨법을 이용한 제곱근 근삿값
-// math.h는 gcc 컴파일러에 따로 연결해주어야 해서 따로 만듬
-// 출처 : https://codeng.tistory.com/9
-double get_sqrt(long int num)
-{
-    const int REPEAT = 18; // 16~20 정도 반복하면 상당히 정확한 값을 얻을 수 있다.
-    double tmp = (double)num;
-    double res = (double)num;
-
-    for (int k = 0; k < REPEAT; k++)
-    {
-        if (res < 1.0)
-            break;
-        res = (res * res + tmp) / (2.0 * res);
-    }
-
-    return res;
 }
