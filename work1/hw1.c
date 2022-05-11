@@ -105,6 +105,13 @@ int main(int argc, char *argv[])
     avgTime = get_avgtime(&totalTime, count);              // 평균
     stdDevTime = get_stddevtime(runTime, &avgTime, count); // 표준편차
 
+    // 히스토그램 출력 디버깅용
+    for (int k=0;k<256;k++)
+    {
+        printf("%3d  ", hisSum[k]);
+    }
+    printf("\n");
+
     printf("%d개 파일 수행시간 합 : %lds %dus\n", count, totalTime.tv_sec, totalTime.tv_usec);
     printf("%d개 파일 수행시간 평균 : %lds %dus\n", count, avgTime.tv_sec, avgTime.tv_usec);
     printf("%d개 파일 수행시간 표준편차 : %lds %dus\n", count, stdDevTime.tv_sec, stdDevTime.tv_usec);
