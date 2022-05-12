@@ -63,7 +63,7 @@ int main(int argc, char *argv[])
         fclose(hisfp);
 
         // data000.bin 파일 열기
-        sprintf(filename, "./data/data%d.bin", i);
+        sprintf(filename, "data%d.bin", i);
         fp = fopen(filename, "rb");
         if (fp == NULL)
         {
@@ -97,20 +97,18 @@ int main(int argc, char *argv[])
 
         // 실행시간(하나의 파일을 읽어서 histogram.bin에 저장하기까지) 출력
         runTime[i - sNum] = get_subtime(&sTime, &eTime);
-        printf("data%d.bin 파일 수행시간 : %lds %dus\n", i, runTime[i - sNum].tv_sec, runTime[i - sNum].tv_usec);
+        //printf("data%d.bin 파일 수행시간 : %lds %ldus\n", i, runTime[i - sNum].tv_sec, runTime[i - sNum].tv_usec);
 
         totalTime = get_sumtime(&totalTime, &runTime[i - sNum]); // 총 수행시간에 더하기
     }
-
-    avgTime = get_avgtime(&totalTime, count);              // 평균
-    stdDevTime = get_stddevtime(runTime, &avgTime, count); // 표준편차
-
-    // 히스토그램 출력 디버깅용
-    for (int k=0;k<256;k++)
+    printf("\n");
+    for (int i = 0; i < 256; i++)
     {
-        printf("%3d  ", hisSum[k]);
+        printf("%3d ", hisSum[i]);
     }
     printf("\n");
+    avgTime = get_avgtime(&totalTime, count);              // 평균
+    stdDevTime = get_stddevtime(runTime, &avgTime, count); // 표준편차
 
     printf("%d개 파일 수행시간 합 : %lds %dus\n", count, totalTime.tv_sec, totalTime.tv_usec);
     printf("%d개 파일 수행시간 평균 : %lds %dus\n", count, avgTime.tv_sec, avgTime.tv_usec);

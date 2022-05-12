@@ -48,7 +48,6 @@ int main(int argc, char *argv[])
     int fnum = 0;  // 자식 프로세스의 파일 개수
     int fidx[2];   // 자식 프로세스의 파일 인덱스(시작, 종료)
 
-
     int hisSum[256] = {0};
     char filename[20];
     int filesize;
@@ -75,21 +74,24 @@ int main(int argc, char *argv[])
         { // 자식 코드
 
             fnum = fshare;
-            if (fremain > tidx){
+            if (fremain > tidx)
+            {
                 fnum++;
             }
 
             fidx[0] = sNum + tidx * fshare;
-            if (tidx < fremain) {
+            if (tidx < fremain)
+            {
                 fidx[0] += tidx;
             }
-            else {
+            else
+            {
                 fidx[0] += fremain;
             }
-            fidx[1] = fidx[0] + fnum -1;
+            fidx[1] = fidx[0] + fnum - 1;
 
             gettimeofday(&cSTime, NULL); // 자식 시작시간 저장
-            
+
             for (int j = fidx[0]; j <= fidx[1]; j++)
             {
                 // histogram.bin 내용을 hisSum에 저장
@@ -146,16 +148,14 @@ int main(int argc, char *argv[])
             printf("%d번째 자식 프로세스 수행시간 : %lds %dus\n", tidx, cRTime.tv_sec, cRTime.tv_usec);
 
             exit(0);
-
         }
     }
 
-    while (wait(&state) > 0);
+    while (wait(&state) > 0)
+        ;
 
     gettimeofday(&pETime, NULL); // 부모 종료시간 저장
-
     pRTime = get_subtime(&pSTime, &pETime);
-
     printf("부모 프로세스 수행시간 : %ldsec %dusec\n", pRTime.tv_sec, pRTime.tv_usec);
 
     return 0;
